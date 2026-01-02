@@ -1,0 +1,6 @@
+Collecting pymongo
+  Using cached pymongo-4.15.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (22 kB)
+Requirement already satisfied: dnspython<3.0.0,>=1.16.0 in ./.venv/lib/python3.12/site-packages (from pymongo) (2.8.0)
+Using cached pymongo-4.15.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+Installing collected packages: pymongo
+Successfully installed pymongo-4.15.5

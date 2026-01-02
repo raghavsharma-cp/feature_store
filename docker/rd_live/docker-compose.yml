@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  rd_live_cron:
+    build:
+      context: ../..
+      dockerfile: docker/rd_live/Dockerfile
+    container_name: rd_live_cron
+    restart: always
+    
+    # Load environment variables from .env.local file
+    # Path is relative to docker-compose.yml location (docker/rd_live/)
+    # This loads ALL variables from .env.local into the container
+    env_file:
+      - ../../.env.local
+    
+    # Environment variables - loaded via env_file above
+    environment:
+      # MongoDB connection
+      - db_uri=${db_uri:-}
+      # GCP bucket configuration
+      - GCP_BUCKET_NAME=${GCP_BUCKET_NAME:-}
+      # GCP authentication (optional - can use service account or default credentials)
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+    
+    # Mount .env.local file if it exists (optional, can also use environment variables above)
+    # Add persistent volumes for data files (CSV outputs, etc.)
+    volumes:
+      - ../../.env.local:/app/.env.local:ro
+      - rd_live_logs:/var/log
+      # Mount GCP credentials if provided (optional - can also use service account)
+      - ../../credentials:/app/credentials:ro
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Health check - verifies cron is running by checking if it can list jobs
+    healthcheck:
+      test: ["CMD-SHELL", "crontab -l > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    networks:
+      - rd_live_network
+    
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  rd_live_logs:
+
+networks:
+  rd_live_network:
+    driver: bridge
+
