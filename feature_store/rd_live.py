@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 from pandas import json_normalize
-from typing import Tuple, Optional
+from typing import Optional
 from google.cloud import storage
 from io import StringIO
 
@@ -28,39 +28,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def extract_hr_rr(feature_store: BaseFeatureStore) -> tuple[pd.DataFrame, pd.DataFrame]:
+def extract_hr_rr(feature_store: BaseFeatureStore) -> pd.DataFrame:
     """
     Extract HR (Heart Rate) and RR (Respiratory Rate) data from the feature store.
     
     For each row in feature_store.base_df, extracts verified vitals data and creates
-    separate rows for HR and RR measurements.
+    rows with both HR and RR columns in the same row.
     
     Args:
         feature_store: BaseFeatureStore instance with populated base_df
         
     Returns:
-        tuple: (df_hr, df_rr) - Two DataFrames with HR and RR data respectively
+        DataFrame with HR and RR columns, where each row represents a vital measurement
+        with both HR and RR values (if available) at the same timestamp
     """
-    # Schema definitions
-    schema_hr = [
+    # Schema definition with both HR and RR columns
+    schema = [
         'cpmrn',
         'encounter',
         'hospitalName',
         'unitName',
         'bedNo',
         'HR',
-        'vitalTimestamp',
-        'admissionTime',
-        'isChosenForExperiment',
-        'isDischarged'
-    ]
-
-    schema_rr = [
-        'cpmrn',
-        'encounter',
-        'hospitalName',
-        'unitName',
-        'bedNo',
         'RR',
         'vitalTimestamp',
         'admissionTime',
@@ -68,17 +57,12 @@ def extract_hr_rr(feature_store: BaseFeatureStore) -> tuple[pd.DataFrame, pd.Dat
         'isDischarged'
     ]
     
-    # Initialize DataFrames
-    df_hr = pd.DataFrame(columns=schema_hr)
-    df_rr = pd.DataFrame(columns=schema_rr)
-    
-    # Lists to store rows before converting to DataFrame
-    hr_rows = []
-    rr_rows = []
+    # List to store rows before converting to DataFrame
+    rows = []
     
     if feature_store.base_df is None or feature_store.base_df.empty:
         logger.warning("feature_store.base_df is empty")
-        return df_hr, df_rr
+        return pd.DataFrame(columns=schema)
     
     for _, row in feature_store.base_df.iterrows():
         # Get patient identifiers from the row
@@ -116,43 +100,30 @@ def extract_hr_rr(feature_store: BaseFeatureStore) -> tuple[pd.DataFrame, pd.Dat
             # Extract RR value (daysRR)
             rr_value = vital_dict.get('daysRR')
             
-            # Create base row data
-            base_row_data = {
-                'cpmrn': cpmrn,
-                'encounter': encounter,
-                'hospitalName': hospital_name,
-                'unitName': unit_name,
-                'bedNo': bed_no,
-                'vitalTimestamp': vital_timestamp,
-                'admissionTime': admission_time,
-                'isChosenForExperiment': False,
-                'isDischarged': False
-            }
-            
-            # Add HR row if HR value exists
-            if hr_value is not None:
-                hr_row = base_row_data.copy()
-                hr_row['HR'] = hr_value
-                hr_rows.append(hr_row)
-            
-            # Add RR row if RR value exists
-            if rr_value is not None:
-                rr_row = base_row_data.copy()
-                rr_row['RR'] = rr_value
-                rr_rows.append(rr_row)
+            # Only create a row if at least one value exists
+            if hr_value is not None or rr_value is not None:
+                row_data = {
+                    'cpmrn': cpmrn,
+                    'encounter': encounter,
+                    'hospitalName': hospital_name,
+                    'unitName': unit_name,
+                    'bedNo': bed_no,
+                    'HR': hr_value,
+                    'RR': rr_value,
+                    'vitalTimestamp': vital_timestamp,
+                    'admissionTime': admission_time,
+                    'isChosenForExperiment': False,
+                    'isDischarged': False
+                }
+                rows.append(row_data)
     
-    # Convert lists to DataFrames
-    if hr_rows:
-        df_hr = pd.DataFrame(hr_rows)
+    # Convert list to DataFrame
+    if rows:
+        df = pd.DataFrame(rows)
     else:
-        df_hr = pd.DataFrame(columns=schema_hr)
+        df = pd.DataFrame(columns=schema)
     
-    if rr_rows:
-        df_rr = pd.DataFrame(rr_rows)
-    else:
-        df_rr = pd.DataFrame(columns=schema_rr)
-    
-    return df_hr, df_rr
+    return df
 
 def download_csv_from_gcp(bucket_name: str, file_path: str) -> Optional[pd.DataFrame]:
     """
@@ -213,7 +184,7 @@ def upload_csv_to_gcp(df: pd.DataFrame, bucket_name: str, file_path: str) -> Non
         raise
 
 
-def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_type: str) -> pd.DataFrame:
+def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
     """
     Merge new vital data with existing CSV data.
     
@@ -225,8 +196,7 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_typ
     
     Args:
         existing_df: Existing DataFrame from CSV (may be empty)
-        new_df: New DataFrame with vital data
-        vital_type: Type of vital ('HR' or 'RR')
+        new_df: New DataFrame with vital data (contains both HR and RR columns)
     
     Returns:
         Merged DataFrame with all records
@@ -244,6 +214,10 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_typ
             result_df['isChosenForExperiment'] = False
         if 'isDischarged' not in result_df.columns:
             result_df['isDischarged'] = False
+        if 'HR' not in result_df.columns:
+            result_df['HR'] = None
+        if 'RR' not in result_df.columns:
+            result_df['RR'] = None
         return result_df
     
     # If no new data, mark all existing patients as discharged
@@ -254,12 +228,15 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_typ
     
     # Ensure required columns exist in both DataFrames
     required_columns = ['cpmrn', 'encounter', 'hospitalName', 'unitName', 'bedNo', 
-                        vital_type, 'vitalTimestamp', 'admissionTime', 
+                        'HR', 'RR', 'vitalTimestamp', 'admissionTime', 
                         'isChosenForExperiment', 'isDischarged']
     
     for col in required_columns:
         if col not in existing_df.columns:
-            existing_df[col] = False if col in ['isChosenForExperiment', 'isDischarged'] else None
+            if col in ['isChosenForExperiment', 'isDischarged']:
+                existing_df[col] = False
+            else:
+                existing_df[col] = None
         if col not in new_df.columns:
             if col == 'isChosenForExperiment':
                 new_df[col] = False
@@ -296,12 +273,13 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_typ
             (new_df['encounter'] == encounter)
         ].copy()
         
-        # Create set of existing (vitalTimestamp, vital_value) tuples
+        # Create set of existing (vitalTimestamp, HR, RR) tuples for deduplication
         existing_keys = set()
         if not existing_patient.empty:
             existing_keys = set(zip(
                 existing_patient['vitalTimestamp'],
-                existing_patient[vital_type]
+                existing_patient['HR'].fillna('').astype(str),
+                existing_patient['RR'].fillna('').astype(str)
             ))
         
         # Get last isChosenForExperiment value from existing records
@@ -312,18 +290,23 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_typ
         
         # Find new records to add
         for _, record in new_patient.iterrows():
-            vital_value = record[vital_type]
+            hr_value = record.get('HR')
+            rr_value = record.get('RR')
             vital_timestamp = record['vitalTimestamp']
             
-            # Check if this record already exists
-            if (vital_timestamp, vital_value) not in existing_keys:
+            # Check if this record already exists (same timestamp and same HR/RR values)
+            hr_str = str(hr_value) if pd.notna(hr_value) else ''
+            rr_str = str(rr_value) if pd.notna(rr_value) else ''
+            
+            if (vital_timestamp, hr_str, rr_str) not in existing_keys:
                 new_record = {
                     'cpmrn': cpmrn,
                     'encounter': encounter,
                     'hospitalName': record['hospitalName'],
                     'unitName': record['unitName'],
                     'bedNo': record['bedNo'],
-                    vital_type: vital_value,
+                    'HR': hr_value,
+                    'RR': rr_value,
                     'vitalTimestamp': vital_timestamp,
                     'admissionTime': record['admissionTime'],
                     'isChosenForExperiment': last_is_chosen,
@@ -335,34 +318,31 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame, vital_typ
     if new_records:
         new_records_df = pd.DataFrame(new_records)
         result_df = pd.concat([existing_df, new_records_df], ignore_index=True)
-        logger.info(f"Added {len(new_records)} new {vital_type} records")
+        logger.info(f"Added {len(new_records)} new vital records")
     else:
         result_df = existing_df.copy()
     
     return result_df
 
 
-def update_gcp_csvs(df_hr: pd.DataFrame, df_rr: pd.DataFrame,
+def update_gcp_csvs(df_vitals: pd.DataFrame,
                     bucket_name: Optional[str] = None,
-                    hr_csv_path: Optional[str] = None,
-                    rr_csv_path: Optional[str] = None) -> Tuple[int, int]:
+                    csv_path: Optional[str] = None) -> int:
     """
-    Update CSV files in GCP bucket with HR and RR vital data.
+    Update CSV file in GCP bucket with HR and RR vital data.
     
     This function performs incremental updates:
-    1. Downloads existing CSVs from GCP bucket
+    1. Downloads existing CSV from GCP bucket
     2. Merges new data with existing data
-    3. Uploads updated CSVs back to GCP bucket
+    3. Uploads updated CSV back to GCP bucket
     
     Args:
-        df_hr: DataFrame with HR vital data
-        df_rr: DataFrame with RR vital data
+        df_vitals: DataFrame with HR and RR vital data (both columns in same DataFrame)
         bucket_name: Name of the GCP bucket (from GCP_BUCKET_NAME env var if not provided)
-        hr_csv_path: Path to HR CSV file in bucket (defaults to "HR_VITALS.csv" or with prefix)
-        rr_csv_path: Path to RR CSV file in bucket (defaults to "RR_VITALS.csv" or with prefix)
+        csv_path: Path to CSV file in bucket (defaults to "VITALS.csv" or with prefix)
     
     Returns:
-        tuple: (hr_rows_added, rr_rows_added) - Number of new rows added for each CSV
+        Number of new rows added
     """
     if bucket_name is None:
         bucket_name = os.getenv('GCP_BUCKET_NAME')
@@ -374,54 +354,37 @@ def update_gcp_csvs(df_hr: pd.DataFrame, df_rr: pd.DataFrame,
     if csv_prefix and not csv_prefix.endswith('/'):
         csv_prefix += '/'
     
-    # Set default CSV paths
-    if hr_csv_path is None:
-        hr_csv_path = f"{csv_prefix}HR_VITALS.csv"
-    if rr_csv_path is None:
-        rr_csv_path = f"{csv_prefix}RR_VITALS.csv"
+    # Set default CSV path
+    if csv_path is None:
+        csv_path = f"{csv_prefix}VITALS.csv"
     
-    hr_rows_added = 0
-    rr_rows_added = 0
+    rows_added = 0
     
     try:
-        # Download existing CSVs
-        logger.info(f"Downloading existing CSVs from GCP bucket: {bucket_name}")
-        existing_hr = download_csv_from_gcp(bucket_name, hr_csv_path)
-        existing_rr = download_csv_from_gcp(bucket_name, rr_csv_path)
+        # Download existing CSV
+        logger.info(f"Downloading existing CSV from GCP bucket: {bucket_name}")
+        existing_df = download_csv_from_gcp(bucket_name, csv_path)
         
-        # Merge HR data
-        if not df_hr.empty:
-            logger.info(f"Processing HR data ({len(df_hr)} rows)...")
-            merged_hr = _merge_vitals_csv(existing_hr, df_hr, 'HR')
-            hr_rows_added = len(merged_hr) - len(existing_hr) if not existing_hr.empty else len(merged_hr)
-            upload_csv_to_gcp(merged_hr, bucket_name, hr_csv_path)
-            logger.info(f"HR CSV updated: {hr_rows_added} new rows added, {len(merged_hr)} total rows")
-        elif not existing_hr.empty:
-            # No new HR data, but update discharged status
-            merged_hr = _merge_vitals_csv(existing_hr, pd.DataFrame(), 'HR')
-            upload_csv_to_gcp(merged_hr, bucket_name, hr_csv_path)
+        # Merge data
+        if not df_vitals.empty:
+            logger.info(f"Processing vital data ({len(df_vitals)} rows)...")
+            merged_df = _merge_vitals_csv(existing_df, df_vitals)
+            rows_added = len(merged_df) - len(existing_df) if not existing_df.empty else len(merged_df)
+            upload_csv_to_gcp(merged_df, bucket_name, csv_path)
+            logger.info(f"CSV updated: {rows_added} new rows added, {len(merged_df)} total rows")
+        elif not existing_df.empty:
+            # No new data, but update discharged status
+            merged_df = _merge_vitals_csv(existing_df, pd.DataFrame())
+            upload_csv_to_gcp(merged_df, bucket_name, csv_path)
         
-        # Merge RR data
-        if not df_rr.empty:
-            logger.info(f"Processing RR data ({len(df_rr)} rows)...")
-            merged_rr = _merge_vitals_csv(existing_rr, df_rr, 'RR')
-            rr_rows_added = len(merged_rr) - len(existing_rr) if not existing_rr.empty else len(merged_rr)
-            upload_csv_to_gcp(merged_rr, bucket_name, rr_csv_path)
-            logger.info(f"RR CSV updated: {rr_rows_added} new rows added, {len(merged_rr)} total rows")
-        elif not existing_rr.empty:
-            # No new RR data, but update discharged status
-            merged_rr = _merge_vitals_csv(existing_rr, pd.DataFrame(), 'RR')
-            upload_csv_to_gcp(merged_rr, bucket_name, rr_csv_path)
-        
-        logger.info(f"Successfully updated CSVs in GCP bucket")
-        logger.info(f"HR rows added: {hr_rows_added}")
-        logger.info(f"RR rows added: {rr_rows_added}")
+        logger.info(f"Successfully updated CSV in GCP bucket")
+        logger.info(f"Rows added: {rows_added}")
         
     except Exception as e:
-        logger.error(f"Error updating GCP CSVs: {e}", exc_info=True)
+        logger.error(f"Error updating GCP CSV: {e}", exc_info=True)
         raise
     
-    return hr_rows_added, rr_rows_added
+    return rows_added
 
 def main():
     """
@@ -472,15 +435,14 @@ def main():
     # Extract HR and RR data
     logger.info("Extracting HR and RR Data")
     
-    df_hr, df_rr = extract_hr_rr(feature_store)
+    df_vitals = extract_hr_rr(feature_store)
     
-    logger.info(f"HR DataFrame shape: {df_hr.shape}")
-    logger.info(f"RR DataFrame shape: {df_rr.shape}")
+    logger.info(f"Vitals DataFrame shape: {df_vitals.shape}")
     
-    # Update CSV files in GCP bucket
-    logger.info("Updating CSV files in GCP bucket")
+    # Update CSV file in GCP bucket
+    logger.info("Updating CSV file in GCP bucket")
     
-    update_gcp_csvs(df_hr, df_rr)
+    update_gcp_csvs(df_vitals)
 
     logger.info("Process Complete")
     sys.exit(0)
