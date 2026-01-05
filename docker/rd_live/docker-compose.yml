@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  rd_live_cron:
+  rd_live:
     build:
       context: ../..
       dockerfile: docker/rd_live/Dockerfile
-    container_name: rd_live_cron
-    restart: always
+    container_name: rd_live
+    restart: "no"
     
     # Load environment variables from .env.local file
     # Path is relative to docker-compose.yml location (docker/rd_live/)
@@ -37,14 +37,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    
-    # Health check - verifies cron is running by checking if it can list jobs
-    healthcheck:
-      test: ["CMD-SHELL", "crontab -l > /dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     
     networks:
       - rd_live_network

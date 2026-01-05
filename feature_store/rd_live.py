@@ -436,7 +436,7 @@ def main():
     
     if not patients:
         logger.warning("No currently admitted patients found.")
-        return
+        sys.exit(0)
     
     logger.info(f"Processing {len(patients)} currently admitted patients...")
     
@@ -467,7 +467,7 @@ def main():
         logger.info(f"Base DataFrame shape: {feature_store.base_df.shape}")
     else:
         logger.error("No patients were successfully processed.")
-        return
+        sys.exit(1)
     
     # Extract HR and RR data
     logger.info("Extracting HR and RR Data")
@@ -482,10 +482,14 @@ def main():
     
     update_gcp_csvs(df_hr, df_rr)
 
-
     logger.info("Process Complete")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Fatal error in main execution: {e}", exc_info=True)
+        sys.exit(1)
 

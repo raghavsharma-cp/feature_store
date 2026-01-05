@@ -1,7 +1,0 @@
-# Cron configuration for rd_live.py
-# Run every 6 hours at minute 0 (00:00, 06:00, 12:00, 18:00)
-# Format: minute hour day month weekday command
-0 */6 * * * cd /app && /usr/local/bin/python -m feature_store.rd_live >> /var/log/rd_live.log 2>&1
-
-# Empty line at the end is required
-
