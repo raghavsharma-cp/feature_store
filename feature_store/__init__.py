@@ -14,7 +14,7 @@ from .resp_distress_features import (
     check_num_labs,
     check_ketosis
 )
-from .rd_live import extract_hr_rr, update_gcp_csvs
+from .rd_live import extract_hr_rr
 
 __all__ = [
     'BaseFeatureStore',
