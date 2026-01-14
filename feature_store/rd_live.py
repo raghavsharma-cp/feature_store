@@ -65,17 +65,17 @@ def extract_hr_rr_old(feature_store: BaseFeatureStore) -> pd.DataFrame:
         logger.warning("feature_store.base_df is empty")
         return pd.DataFrame(columns=schema)
     
-    for _, row in feature_store.base_df.iterrows():
+    for row in feature_store.base_df.itertuples(index=False):
         # Get patient identifiers from the row
-        cpmrn = row.get('CPMRN')
-        encounter = row.get('encounters')
-        hospital_name = row.get('hospitalName')
-        unit_name = row.get('unitName')
-        bed_no = row.get('bedNo')
-        admission_time = row.get('ICUAdmitDate')
+        cpmrn = getattr(row, 'CPMRN', None)
+        encounter = getattr(row, 'encounters', None)
+        hospital_name = getattr(row, 'hospitalName', None)
+        unit_name = getattr(row, 'unitName', None)
+        bed_no = getattr(row, 'bedNo', None)
+        admission_time = getattr(row, 'ICUAdmitDate', None)
         
         # Get vitals column
-        vitals = row.get('vitals')
+        vitals = getattr(row, 'vitals', None)
         
         # Skip if vitals is not a list
         if not isinstance(vitals, list):
@@ -183,7 +183,7 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.Dat
     if existing_df.empty:
         if new_df.empty:
             return pd.DataFrame()
-        result_df = new_df.copy()
+        result_df = new_df
         # Ensure required columns exist
         if 'isChosenForExperiment' not in result_df.columns:
             result_df['isChosenForExperiment'] = False
@@ -197,9 +197,8 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.Dat
     
     # If no new data, mark all existing patients as discharged
     if new_df.empty:
-        result_df = existing_df.copy()
-        result_df['isDischarged'] = True
-        return result_df
+        existing_df['isDischarged'] = True
+        return existing_df
     
     # Ensure required columns exist in both DataFrames
     required_columns = ['cpmrn', 'encounter', 'hospitalName', 'unitName', 'bedNo', 
@@ -240,13 +239,13 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.Dat
         existing_patient = existing_df[
             (existing_df['cpmrn'] == cpmrn) & 
             (existing_df['encounter'] == encounter)
-        ].copy()
+        ]
         
         # Get new records for this patient
         new_patient = new_df[
             (new_df['cpmrn'] == cpmrn) & 
             (new_df['encounter'] == encounter)
-        ].copy()
+        ]
         
         # Create set of existing (vitalTimestamp, HR, RR) tuples for deduplication
         existing_keys = set()
@@ -264,10 +263,10 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.Dat
             last_is_chosen = last_record.get('isChosenForExperiment', False)
         
         # Find new records to add
-        for _, record in new_patient.iterrows():
-            hr_value = record.get('HR')
-            rr_value = record.get('RR')
-            vital_timestamp = record['vitalTimestamp']
+        for record in new_patient.itertuples(index=False):
+            hr_value = getattr(record, 'HR', None)
+            rr_value = getattr(record, 'RR', None)
+            vital_timestamp = getattr(record, 'vitalTimestamp', None)
             
             # Check if this record already exists (same timestamp and same HR/RR values)
             hr_str = str(hr_value) if pd.notna(hr_value) else ''
@@ -277,13 +276,13 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.Dat
                 new_record = {
                     'cpmrn': cpmrn,
                     'encounter': encounter,
-                    'hospitalName': record['hospitalName'],
-                    'unitName': record['unitName'],
-                    'bedNo': record['bedNo'],
+                    'hospitalName': getattr(record, 'hospitalName', None),
+                    'unitName': getattr(record, 'unitName', None),
+                    'bedNo': getattr(record, 'bedNo', None),
                     'HR': hr_value,
                     'RR': rr_value,
                     'vitalTimestamp': vital_timestamp,
-                    'admissionTime': record['admissionTime'],
+                    'admissionTime': getattr(record, 'admissionTime', None),
                     'isChosenForExperiment': last_is_chosen,
                     'isDischarged': False
                 }
@@ -294,8 +293,9 @@ def _merge_vitals_csv(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.Dat
         new_records_df = pd.DataFrame(new_records)
         result_df = pd.concat([existing_df, new_records_df], ignore_index=True)
         logger.info(f"Added {len(new_records)} new vital records")
+        del new_records_df
     else:
-        result_df = existing_df.copy()
+        result_df = existing_df
     
     return result_df
 
@@ -347,10 +347,12 @@ def update_gcp_csvs(df_vitals: pd.DataFrame,
             rows_added = len(merged_df) - len(existing_df) if not existing_df.empty else len(merged_df)
             upload_csv_to_gcp(merged_df, bucket_name, csv_path)
             logger.info(f"CSV updated: {rows_added} new rows added, {len(merged_df)} total rows")
+            del merged_df
         elif not existing_df.empty:
             # No new data, but update discharged status
             merged_df = _merge_vitals_csv(existing_df, pd.DataFrame())
             upload_csv_to_gcp(merged_df, bucket_name, csv_path)
+            del merged_df
         
         logger.info(f"Successfully updated CSV in GCP bucket")
         logger.info(f"Rows added: {rows_added}")
@@ -401,14 +403,14 @@ def extract_hr_rr(feature_store: BaseFeatureStore) -> pd.DataFrame:
         logger.warning("feature_store.base_df is empty")
         return pd.DataFrame(columns=schema)
     
-    for _, row in feature_store.base_df.iterrows():
-        cpmrn = row.get('CPMRN')
-        encounter = row.get('encounters')
-        hospital_name = row.get('hospitalName')
-        unit_name = row.get('unitName')
-        bed_no = row.get('bedNo')
-        admission_time = row.get('ICUAdmitDate')
-        vitals = row.get('vitals')
+    for row in feature_store.base_df.itertuples(index=False):
+        cpmrn = getattr(row, 'CPMRN', None)
+        encounter = getattr(row, 'encounters', None)
+        hospital_name = getattr(row, 'hospitalName', None)
+        unit_name = getattr(row, 'unitName', None)
+        bed_no = getattr(row, 'bedNo', None)
+        admission_time = getattr(row, 'ICUAdmitDate', None)
+        vitals = getattr(row, 'vitals', None)
         
         if not isinstance(vitals, list):
             continue
@@ -531,14 +533,23 @@ def main():
     
     logger.info(f"Processing {len(patients)} currently admitted patients...")
     
-    all_dfs = []
+    feature_store.base_df = pd.DataFrame()
+    processed_count = 0
+    
     for idx, patient in enumerate(patients, 1):
         try:
             serializable_obj = convert_to_serializable(patient)
             df = json_normalize(serializable_obj)
             df = feature_store.getNotesKeys('Diagnosis', df, 'notesDiagnoses')
             df = feature_store.getNotesKeys('Summary', df, 'notesSummary')
-            all_dfs.append(df)
+            
+            if feature_store.base_df.empty:
+                feature_store.base_df = df
+            else:
+                feature_store.base_df = pd.concat([feature_store.base_df, df], ignore_index=True)
+            
+            processed_count += 1
+            del df, serializable_obj
             
             if idx % 10 == 0:
                 logger.info(f"Processed {idx}/{len(patients)} patients...")
@@ -546,13 +557,14 @@ def main():
             logger.error(f"Error processing patient {idx}: {e}", exc_info=True)
             continue
     
-    if all_dfs:
-        feature_store.base_df = pd.concat(all_dfs, ignore_index=True)
-        logger.info(f"Successfully loaded {len(all_dfs)} patients into base_df")
+    if processed_count > 0:
+        logger.info(f"Successfully loaded {processed_count} patients into base_df")
         logger.info(f"Base DataFrame shape: {feature_store.base_df.shape}")
     else:
         logger.error("No patients were successfully processed.")
         sys.exit(1)
+    
+    del patients
     
     logger.info("Extracting HR and RR Data")
     df_vitals_old = extract_hr_rr_old(feature_store)
@@ -562,6 +574,7 @@ def main():
     logger.info("Updating Old Vitals CSV file in GCP bucket")
     
     update_gcp_csvs(df_vitals_old)
+    del df_vitals_old
 
     df_vitals = extract_hr_rr(feature_store)
     logger.info(f"New Vitals DataFrame shape: {df_vitals.shape}")
