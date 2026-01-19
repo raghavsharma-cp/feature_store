@@ -1,0 +1,4 @@
+# Cron job to run rd_live.py every hour at minute 0
+# Format for /etc/cron.d/: minute hour day month weekday user command
+0 * * * * appuser cd /app && /opt/venv/bin/python -m feature_store.rd_live >> /var/log/rd_live.log 2>&1
+
