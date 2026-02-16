@@ -51,6 +51,9 @@ def extract_hr_rr(feature_store: BaseFeatureStore) -> pd.DataFrame:
         'bedNo',
         'HR',
         'RR',
+        'daysSpO2',
+        'daysFiO2',
+        'daysVentAirway',
         'vitalTimestamp',
         'admissionTime',
         'isChosenForExperiment'
@@ -127,6 +130,9 @@ def extract_hr_rr(feature_store: BaseFeatureStore) -> pd.DataFrame:
             
             hr_value = vital_dict.get('daysHR')
             rr_value = vital_dict.get('daysRR')
+            days_spo2 = vital_dict.get('daysSpO2')
+            days_fio2 = vital_dict.get('daysFiO2')
+            days_vent_airway = vital_dict.get('daysVentAirway')
             
             if hr_value is not None or rr_value is not None:
                 patient_key = (cpmrn, encounter)
@@ -138,6 +144,9 @@ def extract_hr_rr(feature_store: BaseFeatureStore) -> pd.DataFrame:
                     'bedNo': bed_no,
                     'HR': hr_value,
                     'RR': rr_value,
+                    'daysSpO2': days_spo2,
+                    'daysFiO2': days_fio2,
+                    'daysVentAirway': days_vent_airway,
                     'vitalTimestamp': vital_timestamp,
                     'admissionTime': admission_time,
                     'isChosenForExperiment': False
