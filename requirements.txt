@@ -2,4 +2,12 @@ pymongo>=4.0.0
 pandas>=1.5.0
 python-dotenv>=0.19.0
 google-cloud-storage>=2.10.0
+google-cloud-bigquery>=3.0.0
+
+# API (PostgreSQL)
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+pydantic-settings>=2.0.0
 

@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from pymongo import MongoClient
 from bson import ObjectId
 from pandas import json_normalize
@@ -88,18 +88,23 @@ class BaseFeatureStore:
 
         return pat_obj
 
-    def get_all_currently_admitted_patients(self) -> List[dict]:
+    def get_all_currently_admitted_patients(self, limit: Optional[int] = None) -> List[dict]:
         """
-        Get all patients from MongoDB where isCurrentlyAdmitted is True.
-        
+        Get patients from MongoDB where isCurrentlyAdmitted is True.
+
+        Args:
+            limit: If set, only fetch this many patients (reduces memory and time).
+                   Use None to fetch all.
+
         Returns:
             List of patient json objects
         """
-        logger.info("Fetching all currently admitted patients")
+        logger.info("Fetching currently admitted patients" + (f" (limit={limit})" if limit else ""))
         
         dburi = os.environ["db_uri"]
         client = MongoClient(dburi)
-        dbName = dburi.split('/')[-1].split('?')[0]
+        #dbName = dburi.split('/')[-1].split('?')[0]
+        dbName = 'emr-staging'
         
         db = client[dbName]
         patients = db["patients"]
@@ -121,13 +126,66 @@ class BaseFeatureStore:
                     'dob', 'sex', 'address', 'PCP', 'motherInfo', 'weightKg', 'weightUnit', 
                     'gestationAge', 'birthWeight', 'birthWeightUnit', 'weightHistory', 'severity']
         
-        # Use find() instead of find_one() to get all matching patients
-        pat_objs = list(patients.find(query, projection))
+        cursor = patients.find(query, projection)
+        if limit is not None:
+            cursor = cursor.limit(limit)
+        pat_objs = list(cursor)
         
         logger.info(f"Found {len(pat_objs)} currently admitted patients")
         
         return pat_objs
-    
+
+    def get_discharged_patients_in_range(
+        self,
+        start_date: date,
+        end_date: date,
+        limit: Optional[int] = None,
+    ) -> List[dict]:
+        """
+        Get patients from MongoDB who are discharged (isCurrentlyAdmitted False)
+        and whose ICUDischargeDate is between start_date and end_date (inclusive).
+
+        Returns the same shape as get_all_currently_admitted_patients (list of patient dicts).
+        """
+        logger.info(
+            "Fetching discharged patients in range %s to %s",
+            start_date.isoformat(),
+            end_date.isoformat(),
+        )
+        dburi = os.environ.get("db_uri")
+        if not dburi:
+            raise ValueError("db_uri environment variable is not set")
+        client = MongoClient(dburi)
+        db_name = "emr-staging" if "emr-staging" in dburi else dburi.split("/")[-1].split("?")[0]
+        db = client[db_name]
+        patients = db["patients"]
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.max.time())
+        query = {
+            "isCurrentlyAdmitted": False,
+            "ICUDischargeDate": {"$gte": start_dt, "$lte": end_dt},
+        }
+        projection = [
+            "_id", "covidDetails", "orders", "io", "roxIndex", "initialSymtoms", "allergies",
+            "chiefComplaint", "otherComplications", "signsAtAdmission", "symptomsAtAdmission",
+            "underlyingMedicalConditions", "pastMedicalHistory", "chronic", "immune", "diagnoses",
+            "markedToWriteNotes", "communicatedOrders", "pressors", "pastPatientMonitorIds",
+            "apacheScore", "ventFreeDays", "name", "lastName", "onSet", "patientImage",
+            "heightCm", "weightKg", "IBW", "BMI", "MRN", "CPMRN", "bedNo", "camera",
+            "hospitalName", "unitName", "hospitalLogo", "ICUAdmitDate", "isCurrentlyAdmitted",
+            "encounters", "isolation", "createdBy", "commandCenterID", "hospitalID", "unitID",
+            "transferHistory", "documents", "days", "vitals", "sbar", "summary", "code_blue",
+            "createdAt", "updatedAt", "__v", "lastOpened", "notes", "ICUDischargeDate", "age",
+            "dob", "sex", "address", "PCP", "motherInfo", "weightKg", "weightUnit",
+            "gestationAge", "birthWeight", "birthWeightUnit", "weightHistory", "severity",
+        ]
+        cursor = patients.find(query, projection)
+        if limit is not None:
+            cursor = cursor.limit(limit)
+        pat_objs = list(cursor)
+        logger.info("Found %d discharged patients in range", len(pat_objs))
+        return pat_objs
+
     def getNotesKeys(self, key_name: str, df: pd.DataFrame, new_col_name: str) -> pd.DataFrame:
         """
         Extract values from notes.finalNotes based on displayName matching key_name.
